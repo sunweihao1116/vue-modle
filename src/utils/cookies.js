@@ -1,4 +1,4 @@
-
+/* eslint-disable */
 
 export function getCookie(cname) {
   var name = cname + "=";
@@ -15,9 +15,7 @@ export function setCookie (cname, cvalue, exdays) {
   var d = new Date();
   d.setTime(d.getTime() + exdays * 24 * 60 * 60 * 1000);
   var expires = "expires=" + d.toUTCString();
-  console.info(cname + "=" + cvalue + "; " + expires);
   document.cookie = cname + "=" + cvalue + "; " + expires;
-  console.info(document.cookie);
 }
 
 export function deleteCookie(cname) {
