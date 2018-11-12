@@ -1,63 +1,61 @@
 import axios from 'axios';
 import md5 from './md5';
-import base64 from './base64';
-import { getCookie, setCookie } from './cookies'
+import store from '../store';
+import router from '../router';
+import { autoLogin, updateToken } from './auth';
 
-const APIHOST = process.env.API_HOST;
-
-const version = '/v1'
-
-const authorizationType = 'Bearer'
-
-const isDebug = true;
-
-let token = getCookie('weitingWebToken')
-
-
-const pushAll = function (...args) {
-  return this.concat(args)
+function pushAll(...args) {
+  return this.concat(args);
 }
 
-const getMobilenDelegate = (t, p) => {
-  if(t) {
-    const i = t.split(".")[1];
-    const obj = JSON.parse(base64.decode(i));
-    return {
-      mobile: obj.jti,
-      delegate: obj.aud,
-    };
-  } else {
-    return {
-      mobile: p.mobile,
-      delegate: p.delegateID,
+const cleanParams = (p = {}) => {
+  Object.keys(p).forEach(k => {
+    if (p[k] === undefined || p[k] === null) {
+      delete p[k];
     }
+  });
+};
+
+const symbols = { '%': '%25', '&': '%26', '*': '%2a', '+': '%2b', ';': '%3b' };
+const encodeParames = (p = {}) => {
+  Object.keys(p).forEach(k => {
+    Object.keys(symbols).forEach(sk => {
+      if (typeof p[k] === 'string') {
+        const str = new RegExp(`\\${sk}`, 'g');
+        p[k] = p[k].replace(str, symbols[sk]);
+      }
+    });
+  });
+};
+
+const goLogin = (config) => {
+  if (store.state.wxAppid) {
+    autoLogin(config);
+  } else {
+    router.replace(config.tokenType.url);
   }
 };
 
 const sign = config => {
-  const isGet = config.method === 'GET'
+  const isGet = ['GET', 'DELETE'].indexOf(config.method) >= 0;
   const params = isGet ? config.params : config.data;
   const timestamp = Math.floor(Date.now() / 1000);
-  const { mobile, delegate } = getMobilenDelegate(token, params)
-
-  let arr = pushAll.call([], mobile, delegate, config.method, `${version}${config.url}`, timestamp);
-
-  const ps = Object.entries(params).sort().map(e => `${e[0]}=${e[1]}`).join('&');
+  const account = config.tokenType ? config.tokenType.jwtInfo.jti : '';
+  const delegate = store.state.delegate;
+  let arr = pushAll.call([], account, delegate, config.method, config.url, timestamp);
+  const ps = params ? Object.entries(params).sort().map(e => `${e[0]}=${e[1]}`).join('&') : '';
   if (isGet) {
-    arr = pushAll.call(arr, ps, '')
+    arr = pushAll.call(arr, ps, '', '');
   } else {
-    arr = pushAll.call(arr, '', ps)
+    arr = pushAll.call(arr, '', ps, '');
   }
   const str = `|${arr.join('|')}|`;
-  console.log(str)
   config.headers['X-Signature'] = md5(str);
   config.headers['X-Timestamp'] = timestamp;
 };
 
-const goLogin = () => {
-  console.log('Login first!!')
-  // window.location.href = 'index.html';
-};
+const genPromiseWithErrorMessage = message => new Promise((resovle, reject) => reject({ message }));
+const genPromiseWithOutErrorMessage = () => new Promise((resovle, reject) => reject({ break: true }));
 
 /**
  *
@@ -66,68 +64,94 @@ const goLogin = () => {
  * @param {*} method
  */
 
-const fetch = (url, params, method) => {
+const fetch = (host, url, params = {}, method, tokenType) => {
   const config = {
     url,
-    baseURL: APIHOST + version,
+    baseURL: host,
     method: method.toLocaleUpperCase() || 'GET',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
     },
-    transformRequest: [function (data) {
-      let ret = ''
-      for (let it in data) {
-        ret += encodeURIComponent(it) + '=' + encodeURIComponent(data[it]) + '&'
-      }
-      return ret
-    }]
+    tokenType,
+    transformRequest: [
+      data =>
+        Object.entries(data)
+          .map(kv => `${kv[0]}=${kv[1]}`)
+          .join('&'),
+    ],
+    autoJumpFlag: params.autoJumpFlag || false,
   };
+  delete params.autoJumpFlag;
+  params.delegate_code = store.state.delegate;
+  if (method === 'UPLOAD') {
+    config.method = 'POST';
+    config.headers['Content-Type'] = 'multipart/form-data';
+    delete config.transformRequest;
+    const _params = new FormData();
+    // eslint-disable-next-line
+    Object.entries(params).map(val => {
+      _params.append(val[0], val[1]);
+    });
+    params = _params;
+  }
   if (method === 'GET' || method === 'DELETE') {
     config.params = params;
   } else {
     config.data = params;
   }
   if (!config.url) {
-    return;
+    return genPromiseWithErrorMessage('no url');
   }
   config.data = config.data || {};
-  if (config.method === 'DELETE') {
-    config.data = {};
+  // if (config.method === 'DELETE') {
+  //   config.params = {};
+  // }
+  if (config.tokenType) {
+    const token = config.tokenType.token;
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    } else {
+      goLogin(config);
+      // eslint-disable-next-line
+      return genPromiseWithOutErrorMessage();
+    }
   }
-
-  token = getCookie('weitingWebToken')
-  if (isDebug) {
-    token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiIyMDEwMDAyIiwiZXhwIjoxNTE3NDE0Mzk5LCJqdGkiOiIxMzAyMjEyOTQ2NCIsImlhdCI6MTUxNzE5MDg3NiwiaXNzIjoiYXBpLjEwMDEwc2guY24iLCJzdWIiOiIxIiwid3QiOjR9.jpEQModXBrJpVyp6gCwhSe4aciYbGJ5fjcDdcYvl-fw';
-  }
-
-  if (token) {
-    config.headers.Authorization = authorizationType + ' ' + token;
-  } else {
-    goLogin();
-  }
-
+  cleanParams(config.params);
   sign(config);
+  encodeParames(params);
   return new Promise((resovle, reject) => {
     axios(config)
-      .then((res) => {
+      .then(res => {
         const data = res.data;
-        if (data) {
-          if (data.token && data.authorizationType) {
-            setCookie('weitingWebToken', `${data.token}`, 1);
-          }
-          resovle(data);
-        } else {
-          reject(data);
-        }
+        resovle(data);
       })
-      .catch((err) => {
-        let error = { content: '服务器错误' };
-        if (err && err.response && err.response.data && err.response.data.error) {
-          error = err.response.data.error;
+      .catch(err => {
+        let error = { message: '服务器错误' };
+        if (err.response && err.response.status === 401) {
+          if (tokenType) {
+            reject({ break: true });
+            updateToken('', tokenType);
+            goLogin(config);
+          }
+          return;
+        }
+        if (err && err.response && err.response.data) {
+          const d = err.response.data;
+          error = {
+            message: d.displayedMsg,
+            httpstatus: err.response.status,
+          };
         }
         reject(error);
       });
   });
 };
 
-export default fetch;
+export const fetchData = (host, url, params, method) => fetch(host, url, params, method);
+
+export const fetchMB = (host, url, params, method) => fetch(host, url, params, method, store.state.tokenTypes.mbTokenType);
+
+export const fetchBB = (host, url, params, method) => fetch(host, url, params, method, store.state.tokenTypes.bbTokenType);
+
+export const fetchNC = (host, url, params, method) => fetch(host, url, params, method, store.state.tokenTypes.ncTokenType);
+
