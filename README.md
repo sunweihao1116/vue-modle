@@ -1,4 +1,4 @@
-# vue-modile
+# 上海联通微厅微信公众号
 
 > A Vue.js project
 
